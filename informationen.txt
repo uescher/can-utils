@@ -1,0 +1,31 @@
+  vcan0   D014189  [3] 00 00 E1
+  vcan0   D018149  [3] 00 00 00
+  vcan0   D014189  [3] 00 01 E1
+  vcan0   D018149  [3] 00 01 00
+  vcan0   D014189  [3] 00 00 E1
+  vcan0   D018149  [3] 00 01 00
+  vcan0   D014189  [3] 00 00 E1
+  vcan0   D018149  [3] 00 00 00
+
+  0 bash                                                                                                         
+8D014189030000E1
+89 41 01 8D 03 00 00 00 00 00 E1 00 00 00 00 00
+Jetzt wird select() aufgerufen
+Es wurde select() aufgerufen. Rückgabewert war 1
+Daten auf udp verfügbar
+8D01814903000000
+49 81 01 8D 03 00 00 00 00 00 00 00 00 00 00 00
+Jetzt wird select() aufgerufen
+
+  1 bash                                                                                                         
+ulrich@horiba:~/can-utils/can-utils$ printf "\xa5\x5a\x00\x02" | nc -w 1 -u licht.shack 1337
+ulrich@horiba:~/can-utils/can-utils$ printf "\xa5\x5a\x00\x01" | nc -w 1 -u licht.shack 1337
+ulrich@horiba:~/can-utils/can-utils$ printf "\xa5\x5a\x00\x00" | nc -w 1 -u licht.shack 1337
+ulrich@horiba:~/can-utils/can-utils$ ./cansend vcan0 0D014189#0001E1
+ulrich@horiba:~/can-utils/can-utils$ ./cansend vcan0 0D014189#0001E1
+ulrich@horiba:~/can-utils/can-utils$ ./cansend vcan0 0D014189#0000E1
+ulrich@horiba:~/can-utils/can-utils$ ./cansend vcan0 0D014189#0001E1
+ulrich@horiba:~/can-utils/can-utils$ ./cansend vcan0 0D014189#0000E1
+ulrich@horiba:~/can-utils/can-utils$ ./cansend vcan0 0D014189#0000E1
+ulrich@horiba:~/can-utils/can-utils$ 
+  2 bash                                                       
