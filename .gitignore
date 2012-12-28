@@ -44,6 +44,10 @@ GNUmakefile.in
 /slcan_attach
 /slcand
 /slcanpty
+/can-read
+/candump-shackbus
+/cansend_test
+
 
 /can-utils-*.tar.bz2
 /can-utils-*.tar.gz
