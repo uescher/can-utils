@@ -772,7 +772,7 @@ int main(int argc, char **argv)
 				printf("src:%3i ",src);
 				printf("dst:%3i ",dst);
 				printf("prot:%3i",prot);
-
+				printf(" ");
 				fprint_long_canframe(stdout, &frame, NULL, view, maxdlen);
 
 				printf("%s", (color>1)?col_off:"");
