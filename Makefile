@@ -43,6 +43,9 @@ PREFIX = /usr/local
 
 MAKEFLAGS = -k
 
+LDFLAGS  = -lrt
+
+
 CFLAGS    = -O2 -Wall -Wno-parentheses -Iinclude \
 	    -fno-strict-aliasing \
 	    -DSO_RXQ_OVFL=40 \
@@ -98,3 +101,5 @@ log2asc:	log2asc.o	lib.o
 asc2log:	asc2log.o	lib.o
 cansend_test:	cansend_test.o lib.o
 candump-shackbus:	candump-shackbus.o lib.o
+can-read: can-read.o lib.o
+	cc can-read.o -o can-read -lrt
