@@ -244,7 +244,7 @@ int main(int argc, char **argv)
 	remote.sin_family = AF_INET;
     remote.sin_port = htons(4223);
 //    remote.sin_addr.s_addr = inet_addr("192.168.2.101");
-    remote.sin_addr.s_addr = inet_addr("10.42.23.99");
+    remote.sin_addr.s_addr = inet_addr("10.42.0.90");
 //    remote.sin_addr.s_addr = inet_addr("192.168.1.13");
 //    remote.sin_addr.s_addr = inet_addr("0.0.0.0");
 
