@@ -9,7 +9,10 @@
  *   Copyright 2005      Stanislav Marek
  *   email:pisa@cmp.felk.cvut.cz
  *
- *   This software is released under the GPL-License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * any later version.
  */
 
 #include <errno.h>
@@ -26,7 +29,7 @@
 #define ENOTSUPP	524	/* Operation is not supported */
 #endif
 
-/* usefull defines */
+/* useful defines */
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define do_div(a,b) a = (a) / (b)
@@ -192,7 +195,7 @@ static void printf_btr_mcp251x(struct can_bittiming *bt, int hdr)
 	if (hdr) {
 		printf("CNF1 CNF2 CNF3");
 	} else {
-		cnf1 = ((bt->sjw - 1) << 6) | bt->brp;
+		cnf1 = ((bt->sjw - 1) << 6) | (bt->brp - 1);
 		cnf2 = 0x80 | ((bt->phase_seg1 - 1) << 3) | (bt->prop_seg - 1);
 		cnf3 = bt->phase_seg2 - 1;
 		printf("0x%02x 0x%02x 0x%02x", cnf1, cnf2, cnf3);

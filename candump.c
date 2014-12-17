@@ -43,12 +43,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
 #include <ctype.h>
 #include <libgen.h>
 #include <time.h>
+#include <errno.h>
 
 #include <sys/time.h>
 #include <sys/types.h>
@@ -121,6 +123,7 @@ void print_usage(char *prg)
 	fprintf(stderr, "         -d          (monitor dropped CAN frames)\n");
 	fprintf(stderr, "         -e          (dump CAN error frames in human-readable format)\n");
 	fprintf(stderr, "         -x          (print extra message infos, rx/tx brs esi)\n");
+	fprintf(stderr, "         -T <msecs>  (terminate after <msecs> without any reception)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Up to %d CAN interfaces with optional filter sets can be specified\n", MAXSOCK);
 	fprintf(stderr, "on the commandline in the form: <ifname>[,filter]*\n");
@@ -227,6 +230,7 @@ int main(int argc, char **argv)
 	int nbytes, i, maxdlen;
 	struct ifreq ifr;
 	struct timeval tv, last_tv;
+	struct timeval timeout, timeout_config = { 0, 0 }, *timeout_current = NULL;
 	FILE *logfile = NULL;
 
 	signal(SIGTERM, sigterm);
@@ -236,7 +240,7 @@ int main(int argc, char **argv)
 	last_tv.tv_sec  = 0;
 	last_tv.tv_usec = 0;
 
-	while ((opt = getopt(argc, argv, "t:ciaSs:b:B:u:ldxLn:r:he?")) != -1) {
+	while ((opt = getopt(argc, argv, "t:ciaSs:b:B:u:ldxLn:r:heT:?")) != -1) {
 		switch (opt) {
 		case 't':
 			timestamp = optarg[0];
@@ -351,6 +355,17 @@ int main(int argc, char **argv)
 			}
 			break;
 
+		case 'T':
+			errno = 0;
+			timeout_config.tv_usec = strtol(optarg, NULL, 0);
+			if (errno != 0) {
+				print_usage(basename(argv[0]));
+				exit(1);
+			}
+			timeout_config.tv_sec = timeout_config.tv_usec / 1000;
+			timeout_config.tv_usec = (timeout_config.tv_usec % 1000) * 1000;
+			timeout_current = &timeout;
+			break;
 		default:
 			print_usage(basename(argv[0]));
 			exit(1);
@@ -594,7 +609,10 @@ int main(int argc, char **argv)
 		for (i=0; i<currmax; i++)
 			FD_SET(s[i], &rdfs);
 
-		if ((ret = select(s[currmax-1]+1, &rdfs, NULL, NULL, NULL)) < 0) {
+		if (timeout_current)
+			*timeout_current = timeout_config;
+
+		if ((ret = select(s[currmax-1]+1, &rdfs, NULL, NULL, timeout_current)) <= 0) {
 			//perror("select");
 			running = 0;
 			continue;
@@ -656,12 +674,7 @@ int main(int argc, char **argv)
 				/* check for (unlikely) dropped frames on this specific socket */
 				if (dropcnt[i] != last_dropcnt[i]) {
 
-					__u32 frames;
-
-					if (dropcnt[i] > last_dropcnt[i])
-						frames = dropcnt[i] - last_dropcnt[i];
-					else
-						frames = 4294967295U - last_dropcnt[i] + dropcnt[i]; /* 4294967295U == UINT32_MAX */
+					__u32 frames = dropcnt[i] - last_dropcnt[i];
 
 					if (silent != SILENT_ON)
 						printf("DROPCOUNT: dropped %d CAN frame%s on '%s' socket (total drops %d)\n",
@@ -681,18 +694,23 @@ int main(int argc, char **argv)
 					view |= CANLIB_VIEW_INDENT_SFF;
 
 				if (log) {
+					char buf[CL_CFSZ]; /* max length */
+
 					/* log CAN frame with absolute timestamp & device */
-					fprintf(logfile, "(%010ld.%06ld) ", tv.tv_sec, tv.tv_usec);
-					fprintf(logfile, "%*s ", max_devname_len, devname[idx]);
-					/* without seperator as logfile use-case is parsing */
-					fprint_canframe(logfile, &frame, "\n", 0, maxdlen);
+					sprint_canframe(buf, &frame, 0, maxdlen);
+					fprintf(logfile, "(%010ld.%06ld) %*s %s\n",
+						tv.tv_sec, tv.tv_usec,
+						max_devname_len, devname[idx], buf);
 				}
 
 				if (logfrmt) {
+					char buf[CL_CFSZ]; /* max length */
+
 					/* print CAN frame in log file style to stdout */
-					printf("(%010ld.%06ld) ", tv.tv_sec, tv.tv_usec);
-					printf("%*s ", max_devname_len, devname[idx]);
-					fprint_canframe(stdout, &frame, "\n", 0, maxdlen);
+					sprint_canframe(buf, &frame, 0, maxdlen);
+					printf("(%010ld.%06ld) %*s %s\n",
+					       tv.tv_sec, tv.tv_usec,
+					       max_devname_len, devname[idx], buf);
 					goto out_fflush; /* no other output to stdout */
 				}
 

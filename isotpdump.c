@@ -60,6 +60,7 @@
 #define NO_CAN_ID 0xFFFFFFFFU
 
 const char fc_info [4][9] = { "CTS", "WT", "OVFLW", "reserved" };
+const int canfd_on = 1;
 
 void print_usage(char *prg)
 {
@@ -67,6 +68,7 @@ void print_usage(char *prg)
 	fprintf(stderr, "Options: -s <can_id> (source can_id. Use 8 digits for extended IDs)\n");
 	fprintf(stderr, "         -d <can_id> (destination can_id. Use 8 digits for extended IDs)\n");
 	fprintf(stderr, "         -x <addr>   (extended addressing mode. Use 'any' for all addresses)\n");
+	fprintf(stderr, "         -X <addr>   (extended addressing mode (rx addr). Use 'any' for all)\n");
 	fprintf(stderr, "         -c          (color mode)\n");
 	fprintf(stderr, "         -a          (print data also in ASCII-chars)\n");
 	fprintf(stderr, "         -t <type>   (timestamp: (a)bsolute/(d)elta/(z)ero/(A)bsolute w date)\n");
@@ -79,17 +81,21 @@ int main(int argc, char **argv)
 	int s;
 	struct sockaddr_can addr;
 	struct can_filter rfilter[2];
-	struct can_frame frame;
+	struct canfd_frame frame;
 	int nbytes, i;
 	canid_t src = NO_CAN_ID;
 	canid_t dst = NO_CAN_ID;
 	int ext = 0;
 	int extaddr = 0;
 	int extany = 0;
+	int rx_ext = 0;
+	int rx_extaddr = 0;
+	int rx_extany = 0;
 	int asc = 0;
 	int color = 0;
 	int timestamp = 0;
 	int datidx = 0;
+	unsigned long fflen = 0;
 	struct ifreq ifr;
 	int ifindex;
 	struct timeval tv, last_tv;
@@ -99,7 +105,7 @@ int main(int argc, char **argv)
 	last_tv.tv_sec  = 0;
 	last_tv.tv_usec = 0;
 
-	while ((opt = getopt(argc, argv, "s:d:ax:ct:?")) != -1) {
+	while ((opt = getopt(argc, argv, "s:d:ax:X:ct:?")) != -1) {
 		switch (opt) {
 		case 's':
 			src = strtoul(optarg, (char **)NULL, 16);
@@ -127,7 +133,14 @@ int main(int argc, char **argv)
 				extany = 1;
 			else
 				extaddr = strtoul(optarg, (char **)NULL, 16) & 0xFF;
+			break;
 
+		case 'X':
+			rx_ext = 1;
+			if (!strncmp(optarg, "any", 3))
+				rx_extany = 1;
+			else
+				rx_extaddr = strtoul(optarg, (char **)NULL, 16) & 0xFF;
 			break;
 
 		case 't':
@@ -153,6 +166,11 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (rx_ext && !ext) {
+		print_usage(basename(argv[0]));
+		exit(0);
+	}
+
 	if ((argc - optind) != 1 || src == NO_CAN_ID || dst == NO_CAN_ID) {
 		print_usage(basename(argv[0]));
 		exit(0);
@@ -163,6 +181,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	/* try to switch the socket into CAN FD mode */
+	setsockopt(s, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &canfd_on, sizeof(canfd_on));
 
 	if (src & CAN_EFF_FLAG) {
 		rfilter[0].can_id   = src & (CAN_EFF_MASK | CAN_EFF_FLAG);
@@ -195,16 +215,19 @@ int main(int argc, char **argv)
 	}
 
 	while (1) {
-
-		if ((nbytes = read(s, &frame, sizeof(struct can_frame))) < 0) {
+		nbytes = read(s, &frame, sizeof(frame));
+		if (nbytes < 0) {
 			perror("read");
 			return 1;
-		} else if (nbytes < sizeof(struct can_frame)) {
-			fprintf(stderr, "read: incomplete CAN frame\n");
+		} else if (nbytes != CAN_MTU && nbytes != CANFD_MTU) {
+			fprintf(stderr, "read: incomplete CAN frame %lu %d\n", sizeof(frame), nbytes);
 			return 1;
 		} else {
 
-			if (ext && !extany && extaddr != frame.data[0])
+			if (frame.can_id == src && ext && !extany && extaddr != frame.data[0])
+				continue;
+
+			if (frame.can_id == dst && rx_ext && !rx_extany && rx_extaddr != frame.data[0])
 				continue;
 
 			if (color)
@@ -264,21 +287,37 @@ int main(int argc, char **argv)
 			if (ext)
 				printf("{%02X}", frame.data[0]);
 
-			printf("  [%d]  ", frame.can_dlc);
+			if (nbytes == CAN_MTU)
+				printf("  [%d]  ", frame.len);
+			else
+				printf(" [%02d]  ", frame.len);
 
 			datidx = 0;
 			n_pci = frame.data[ext];
 	    
 			switch (n_pci & 0xF0) {
 			case 0x00:
-				printf("[SF] ln: %-4d data:", n_pci & 0x0F);
-				datidx = ext+1;
+				if (n_pci & 0xF) {
+					printf("[SF] ln: %-4d data:", n_pci & 0xF);
+					datidx = ext+1;
+				} else {
+					printf("[SF] ln: %-4d data:", frame.data[ext + 1]);
+					datidx = ext+2;
+				}
 				break;
 
 			case 0x10:
-				printf("[FF] ln: %-4d data:",
-				       ((n_pci & 0x0F)<<8) + frame.data[ext+1] );
-				datidx = ext+2;
+				fflen = ((n_pci & 0x0F)<<8) + frame.data[ext+1];
+				if (fflen)
+					datidx = ext+2;
+				else {
+					fflen = (frame.data[ext+2]<<24) +
+						(frame.data[ext+3]<<16) +
+						(frame.data[ext+4]<<8) +
+						frame.data[ext+5];
+					datidx = ext+6;
+				}
+				printf("[FF] ln: %-4lu data:", fflen);
 				break;
 
 			case 0x20:
@@ -313,16 +352,16 @@ int main(int argc, char **argv)
 				printf("[??]");
 			}
 
-			if (datidx && frame.can_dlc > datidx) {
+			if (datidx && frame.len > datidx) {
 				printf(" ");
-				for (i = datidx; i < frame.can_dlc; i++) {
+				for (i = datidx; i < frame.len; i++) {
 					printf("%02X ", frame.data[i]);
 				}
 
 				if (asc) {
-					printf("%*s", ((7-ext) - (frame.can_dlc-datidx))*3 + 5 ,
+					printf("%*s", ((7-ext) - (frame.len-datidx))*3 + 5 ,
 					       "-  '");
-					for (i = datidx; i < frame.can_dlc; i++) {
+					for (i = datidx; i < frame.len; i++) {
 						printf("%c",((frame.data[i] > 0x1F) &&
 							     (frame.data[i] < 0x7F))?
 						       frame.data[i] : '.');

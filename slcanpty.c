@@ -64,21 +64,29 @@ static int asc2nibble(char c)
 
 /* read data from pty, send CAN frames to CAN socket and answer commands */
 int pty2can(int pty, int socket, struct can_filter *fi,
-	       int *is_open, int *tstamp)
+	    int *is_open, int *tstamp)
 {
 	int nbytes;
 	char cmd;
-	char buf[200];
+	static char buf[200];
 	char replybuf[10]; /* for answers to received commands */
 	int ptr;
 	struct can_frame frame;
 	int tmp, i;
+	static int rxoffset = 0; /* points to the end of an received incomplete SLCAN message */
 
-	nbytes = read(pty, &buf, sizeof(buf)-1);
-	if (nbytes < 0) {
-		perror("read pty");
+	nbytes = read(pty, &buf[rxoffset], sizeof(buf)-rxoffset-1);
+	if (nbytes <= 0) {
+		/* nbytes == 0 : no error but pty decriptor has been closed */
+		if (nbytes < 0)
+			perror("read pty");
+
 		return 1;
 	}
+
+	/* reset incomplete message offset */
+	nbytes += rxoffset;
+	rxoffset = 0;
 
 rx_restart:
 	/* remove trailing '\r' characters to be robust against some apps */
@@ -90,6 +98,21 @@ rx_restart:
 
 	if (!nbytes)
 		return 0;
+
+	/* check if we can detect a complete SLCAN message including '\r' */
+	for (tmp = 0; tmp < nbytes; tmp++) {
+		if (buf[tmp] == '\r')
+			break;
+	}
+
+	/* no '\r' found in the message buffer? */
+	if (tmp == nbytes) {
+		/* save incomplete message */
+		rxoffset = nbytes;
+
+		/* leave here and read from pty again */
+		return 0;
+	}
 
 	cmd = buf[0];
 	buf[nbytes] = 0;
@@ -363,6 +386,27 @@ int can2pty(int pty, int socket, int *tstamp)
 	return 0;
 }
 
+int check_select_stdin(void)
+{
+	fd_set rdfs;
+	struct timeval timeout;
+	int ret;
+
+	FD_ZERO(&rdfs);
+	FD_SET(0, &rdfs);
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 0;
+
+	ret = select(1, &rdfs, NULL, NULL, &timeout);
+
+	if (ret < 0)
+		return 0; /* not selectable */
+
+	if (ret > 0 && getchar() == EOF)
+		return 0; /* EOF, eg. /dev/null */
+
+	return 1;
+}
 
 int main(int argc, char **argv)
 {
@@ -372,6 +416,7 @@ int main(int argc, char **argv)
 	struct sockaddr_can addr;
 	struct termios topts;
 	struct ifreq ifr;
+	int select_stdin = 0;
 	int running = 1;
 	int tstamp = 0;
 	int is_open = 0;
@@ -393,6 +438,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	select_stdin = check_select_stdin();
+
 	/* open pty */
 	p = open(argv[1], O_RDWR);
 	if (p < 0) {
@@ -407,7 +454,9 @@ int main(int argc, char **argv)
 
 	/* disable local echo which would cause double frames */
 	topts.c_lflag &= ~(ICANON | ECHO | ECHOE | ECHOK |
-			   ECHONL | ECHOPRT | ECHOKE | ICRNL);
+			   ECHONL | ECHOPRT | ECHOKE);
+	topts.c_iflag &= ~(ICRNL);
+	topts.c_iflag |= INLCR;
 	tcsetattr(p, TCSANOW, &topts);
 
 	/* Support for the Unix 98 pseudo-terminal interface /dev/ptmx /dev/pts/N */
@@ -464,7 +513,10 @@ int main(int argc, char **argv)
 	while (running) {
 
 		FD_ZERO(&rdfs);
-		FD_SET(0, &rdfs);
+
+		if (select_stdin)
+			FD_SET(0, &rdfs);
+
 		FD_SET(p, &rdfs);
 		FD_SET(s, &rdfs);
 

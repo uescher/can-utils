@@ -56,20 +56,22 @@
 #include <linux/can/isotp.h>
 
 #define NO_CAN_ID 0xFFFFFFFFU
+#define BUFSIZE 5000 /* size > 4095 to check socket API internal checks */
 
 void print_usage(char *prg)
 {
 	fprintf(stderr, "\nUsage: %s [options] <CAN interface>\n", prg);
 	fprintf(stderr, "Options: -s <can_id>  (source can_id. Use 8 digits for extended IDs)\n");
 	fprintf(stderr, "         -d <can_id>  (destination can_id. Use 8 digits for extended IDs)\n");
-	fprintf(stderr, "         -x <addr>    (extended addressing mode.)\n");
-	fprintf(stderr, "         -p <byte>    (set and enable padding byte)\n");
-	fprintf(stderr, "         -P <mode>    (check padding in SF/CF. (l)ength (c)ontent (a)ll)\n");
+	fprintf(stderr, "         -x <addr>[:<rxaddr>] (extended addressing / opt. separate rxaddr)\n");
+	fprintf(stderr, "         -p [tx]:[rx] (set and enable tx/rx padding bytes)\n");
+	fprintf(stderr, "         -P <mode>    (check rx padding for (l)ength (c)ontent (a)ll)\n");
 	fprintf(stderr, "         -b <bs>      (blocksize. 0 = off)\n");
 	fprintf(stderr, "         -m <val>     (STmin in ms/ns. See spec.)\n");
 	fprintf(stderr, "         -f <time ns> (force rx stmin value in nanosecs)\n");
 	fprintf(stderr, "         -w <num>     (max. wait frame transmissions.)\n");
 	fprintf(stderr, "         -l           (loop: do not exit after pdu receiption.)\n");
+	fprintf(stderr, "         -L <mtu>:<tx_dl>:<tx_flags> (link layer options for CAN FD)\n");
 	fprintf(stderr, "\nCAN IDs and addresses are given and expected in hexadecimal values.\n");
 	fprintf(stderr, "The pdu data is written on STDOUT in space separated ASCII hex values.\n");
 	fprintf(stderr, "\n");
@@ -82,17 +84,18 @@ int main(int argc, char **argv)
     struct ifreq ifr;
     static struct can_isotp_options opts;
     static struct can_isotp_fc_options fcopts;
+    static struct can_isotp_ll_options llopts;
     int opt, i;
     extern int optind, opterr, optopt;
     __u32 force_rx_stmin = 0;
     int loop = 0;
 
-    unsigned char msg[4096];
+    unsigned char msg[BUFSIZE];
     int nbytes;
 
     addr.can_addr.tp.tx_id = addr.can_addr.tp.rx_id = NO_CAN_ID;
 
-    while ((opt = getopt(argc, argv, "s:d:x:p:P:b:m:w:f:l?")) != -1) {
+    while ((opt = getopt(argc, argv, "s:d:x:p:P:b:m:w:f:lL:?")) != -1) {
 	    switch (opt) {
 	    case 's':
 		    addr.can_addr.tp.tx_id = strtoul(optarg, (char **)NULL, 16);
@@ -107,14 +110,42 @@ int main(int argc, char **argv)
 		    break;
 
 	    case 'x':
-		    opts.flags |= CAN_ISOTP_EXTEND_ADDR;
-		    opts.ext_address = strtoul(optarg, (char **)NULL, 16) & 0xFF;
+	    {
+		    int elements = sscanf(optarg, "%hhx:%hhx",
+					  &opts.ext_address,
+					  &opts.rx_ext_address);
+
+		    if (elements == 1)
+			    opts.flags |= CAN_ISOTP_EXTEND_ADDR;
+		    else if (elements == 2)
+			    opts.flags |= (CAN_ISOTP_EXTEND_ADDR | CAN_ISOTP_RX_EXT_ADDR);
+		    else {
+			    printf("incorrect extended addr values '%s'.\n", optarg);
+			    print_usage(basename(argv[0]));
+			    exit(0);
+		    }
 		    break;
+	    }
 
 	    case 'p':
-		    opts.flags |= CAN_ISOTP_RX_PADDING;
-		    opts.rxpad_content = strtoul(optarg, (char **)NULL, 16) & 0xFF;
+	    {
+		    int elements = sscanf(optarg, "%hhx:%hhx",
+					  &opts.txpad_content,
+					  &opts.rxpad_content);
+
+		    if (elements == 1)
+			    opts.flags |= CAN_ISOTP_TX_PADDING;
+		    else if (elements == 2)
+			    opts.flags |= (CAN_ISOTP_TX_PADDING | CAN_ISOTP_RX_PADDING);
+		    else if (sscanf(optarg, ":%hhx", &opts.rxpad_content) == 1)
+			    opts.flags |= CAN_ISOTP_RX_PADDING;
+		    else {
+			    printf("incorrect padding values '%s'.\n", optarg);
+			    print_usage(basename(argv[0]));
+			    exit(0);
+		    }
 		    break;
+	    }
 
 	    case 'P':
 		    if (optarg[0] == 'l')
@@ -122,7 +153,7 @@ int main(int argc, char **argv)
 		    else if (optarg[0] == 'c')
 			    opts.flags |= CAN_ISOTP_CHK_PAD_DATA;
 		    else if (optarg[0] == 'a')
-			    opts.flags |= (CAN_ISOTP_CHK_PAD_DATA | CAN_ISOTP_CHK_PAD_DATA);
+			    opts.flags |= (CAN_ISOTP_CHK_PAD_LEN | CAN_ISOTP_CHK_PAD_DATA);
 		    else {
 			    printf("unknown padding check option '%c'.\n", optarg[0]);
 			    print_usage(basename(argv[0]));
@@ -149,6 +180,17 @@ int main(int argc, char **argv)
 
 	    case 'l':
 		    loop = 1;
+		    break;
+
+	    case 'L':
+		    if (sscanf(optarg, "%hhu:%hhu:%hhu",
+			       &llopts.mtu,
+			       &llopts.tx_dl,
+			       &llopts.tx_flags) != 3) {
+			    printf("unknown link layer options '%s'.\n", optarg);
+			    print_usage(basename(argv[0]));
+			    exit(0);
+		    }
 		    break;
 
 	    case '?':
@@ -179,6 +221,13 @@ int main(int argc, char **argv)
     setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_OPTS, &opts, sizeof(opts));
     setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_RECV_FC, &fcopts, sizeof(fcopts));
 
+    if (llopts.tx_dl) {
+	if (setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_LL_OPTS, &llopts, sizeof(llopts)) < 0) {
+	    perror("link layer sockopt");
+	    exit(1);
+	}
+    }
+
     if (opts.flags & CAN_ISOTP_FORCE_RXSTMIN)
 	    setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_RX_STMIN, &force_rx_stmin, sizeof(force_rx_stmin));
 
@@ -194,8 +243,8 @@ int main(int argc, char **argv)
     }
 
     do {
-	    nbytes = read(s, msg, 4096);
-	    if (nbytes > 0 && nbytes < 4096)
+	    nbytes = read(s, msg, BUFSIZE);
+	    if (nbytes > 0 && nbytes < BUFSIZE)
 		    for (i=0; i < nbytes; i++)
 			    printf("%02X ", msg[i]);
 	    printf("\n");

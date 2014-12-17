@@ -38,13 +38,16 @@
 #
 #  Send feedback to <linux-can@vger.kernel.org>
 
-DESTDIR =
-PREFIX = /usr/local
+DESTDIR ?=
+PREFIX ?= /usr/local
 
 MAKEFLAGS = -k
 
-CFLAGS    = -O2 -Wall -Wno-parentheses -Iinclude \
-	    -fno-strict-aliasing \
+CFLAGS    = -O2 -Wall -Wno-parentheses \
+	    -fno-strict-aliasing
+
+CPPFLAGS += -Iinclude \
+	    -D_FILE_OFFSET_BITS=64 \
 	    -DSO_RXQ_OVFL=40 \
 	    -DPF_CAN=29 \
 	    -DAF_CAN=PF_CAN
@@ -89,6 +92,7 @@ asc2log.o:	lib.h
 cansend_test.o:lib.h
 can-read.o:	lib.h
 candump-shackbus.o: lib.h
+canframelen.o:  canframelen.h
 
 cansend:	cansend.o	lib.o
 cangen:		cangen.o	lib.o
@@ -102,3 +106,4 @@ cansend_test:	cansend_test.o lib.o
 candump-shackbus:	candump-shackbus.o lib.o
 can-read: can-read.o lib.o
 	cc can-read.o -o can-read -lrt
+canbusload:	canbusload.o	canframelen.o

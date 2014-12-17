@@ -94,14 +94,15 @@ int parse_canframe(char *cs, struct canfd_frame *cf);
  * Transfers a valid ASCII string decribing a CAN frame into struct canfd_frame.
  *
  * CAN 2.0 frames
- * - string layout <can_id>#{R|data}
- * - {data} has 0 to 8 hex-values that can (optionally) be seperated by '.'
+ * - string layout <can_id>#{R{len}|data}
+ * - {data} has 0 to 8 hex-values that can (optionally) be separated by '.'
+ * - {len} can take values from 0 to 8 and can be omitted if zero
  * - return value on successful parsing: CAN_MTU
  *
  * CAN FD frames
  * - string layout <can_id>##<flags>{data}
  * - <flags> a single ASCII Hex value (0 .. F) which defines canfd_frame.flags
- * - {data} has 0 to 64 hex-values that can (optionally) be seperated by '.'
+ * - {data} has 0 to 64 hex-values that can (optionally) be separated by '.'
  * - return value on successful parsing: CANFD_MTU
  *
  * Return value on detected problems: 0
@@ -115,6 +116,8 @@ int parse_canframe(char *cs, struct canfd_frame *cf);
  * 123# -> standard CAN-Id = 0x123, len = 0
  * 12345678# -> extended CAN-Id = 0x12345678, len = 0
  * 123#R -> standard CAN-Id = 0x123, len = 0, RTR-frame
+ * 123#R0 -> standard CAN-Id = 0x123, len = 0, RTR-frame
+ * 123#R7 -> standard CAN-Id = 0x123, len = 7, RTR-frame
  * 7A1#r -> standard CAN-Id = 0x7A1, len = 0, RTR-frame
  *
  * 123#00 -> standard CAN-Id = 0x123, len = 1, data[0] = 0x00
@@ -143,14 +146,15 @@ void fprint_canframe(FILE *stream , struct canfd_frame *cf, char *eol, int sep, 
 void sprint_canframe(char *buf , struct canfd_frame *cf, int sep, int maxdlen);
 /*
  * Creates a CAN frame hexadecimal output in compact format.
- * The CAN data[] is seperated by '.' when sep != 0.
+ * The CAN data[] is separated by '.' when sep != 0.
  *
  * The type of the CAN frame (CAN 2.0 / CAN FD) is specified by maxdlen:
  * maxdlen = 8 -> CAN2.0 frame
  * maxdlen = 64 -> CAN FD frame
  *
- * 12345678#112233 -> exended CAN-Id = 0x12345678, dlc = 3, data, sep = 0
- * 12345678#R -> exended CAN-Id = 0x12345678, RTR
+ * 12345678#112233 -> extended CAN-Id = 0x12345678, len = 3, data, sep = 0
+ * 12345678#R -> extended CAN-Id = 0x12345678, RTR, len = 0
+ * 12345678#R5 -> extended CAN-Id = 0x12345678, RTR, len = 5
  * 123#11.22.33.44.55.66.77.88 -> standard CAN-Id = 0x123, dlc = 8, sep = 1
  * 32345678#112233 -> error frame with CAN_ERR_FLAG (0x2000000) set
  * 123##0112233 -> CAN FD frame standard CAN-Id = 0x123, flags = 0, len = 3
@@ -180,11 +184,11 @@ void sprint_long_canframe(char *buf , struct canfd_frame *cf, int view, int maxd
  * maxdlen = 8 -> CAN2.0 frame
  * maxdlen = 64 -> CAN FD frame
  *
- * 12345678   [3]  11 22 33 -> exended CAN-Id = 0x12345678, dlc = 3, data
- * 12345678   [0]  remote request -> exended CAN-Id = 0x12345678, RTR
+ * 12345678   [3]  11 22 33 -> extended CAN-Id = 0x12345678, dlc = 3, data
+ * 12345678   [0]  remote request -> extended CAN-Id = 0x12345678, RTR
  * 14B0DC51   [8]  4A 94 E8 2A EC 58 55 62   'J..*.XUb' -> (with ASCII output)
  * 20001111   [7]  C6 23 7B 32 69 98 3C      ERRORFRAME -> (CAN_ERR_FLAG set)
- * 12345678  [03]  11 22 33 -> CAN FD with exended CAN-Id = 0x12345678, dlc = 3
+ * 12345678  [03]  11 22 33 -> CAN FD with extended CAN-Id = 0x12345678, dlc = 3
  *
  * 123   [3]  11 22 33         -> CANLIB_VIEW_INDENT_SFF == 0
  *      123   [3]  11 22 33    -> CANLIB_VIEW_INDENT_SFF == set

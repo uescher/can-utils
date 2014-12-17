@@ -8,32 +8,24 @@ LDADD = \
 	libcan.la
 
 noinst_HEADERS = \
+	canframelen.h \
 	lib.h \
 	terminal.h \
 	include/linux/can/bcm.h \
-	include/linux/can/core.h \
-	include/linux/can/dev.h \
 	include/linux/can/error.h \
 	include/linux/can/gw.h \
 	include/linux/can.h \
 	include/linux/can/isotp.h \
 	include/linux/can/netlink.h \
-	include/linux/can/raw.h \
-	include/socketcan/can/bcm.h \
-	include/socketcan/can/error.h \
-	include/socketcan/can/gw.h \
-	include/socketcan/can.h \
-	include/socketcan/can/ioctl.h \
-	include/socketcan/can/isotp.h \
-	include/socketcan/can/netlink.h \
-	include/socketcan/can/raw.h
+	include/linux/can/raw.h
 
 
 noinst_LTLIBRARIES = \
 	libcan.la
 
 libcan_la_SOURCES = \
-	lib.c
+	lib.c \
+	canframelen.c
 
 
 bin_PROGRAMS = \
@@ -87,4 +79,3 @@ MAINTAINERCLEANFILES = \
 maintainer-clean-local:
 	-chmod -R a+rw $(distdir)
 	-rm -fr $(distdir)
-

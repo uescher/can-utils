@@ -61,6 +61,7 @@
 #include <linux/can/raw.h>
 
 #include "terminal.h"
+#include "canframelen.h"
 
 #define MAXSOCK 16    /* max. number of CAN interfaces given on the cmdline */
 
@@ -84,7 +85,7 @@ static unsigned char redraw;
 static unsigned char timestamp;
 static unsigned char color;
 static unsigned char bargraph;
-static unsigned char ignore_bitstuffing;
+static enum cfl_mode mode = CFL_WORSTCASE;
 static char *prg;
 
 void print_usage(char *prg)
@@ -95,7 +96,8 @@ void print_usage(char *prg)
 	fprintf(stderr, "         -c (colorize lines)\n");
 	fprintf(stderr, "         -b (show bargraph in %d%% resolution)\n", PERCENTRES);
 	fprintf(stderr, "         -r (redraw the terminal - similar to top)\n");
-	fprintf(stderr, "         -i (ignore bitstuffing estimation in bandwith calculation)\n");
+	fprintf(stderr, "         -i (ignore bitstuffing in bandwidth calculation)\n");
+	fprintf(stderr, "         -e (exact calculation of stuffed bits)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Up to %d CAN interfaces with mandatory bitrate can be specified on the \n", MAXSOCK);
 	fprintf(stderr, "commandline in the form: <ifname>@<bitrate>\n\n");
@@ -106,7 +108,7 @@ void print_usage(char *prg)
 	fprintf(stderr, "(interface) (received CAN frames) (used bits total) (used bits for payload)\n");
 	fprintf(stderr, "\nExample:\n");
 	fprintf(stderr, "\nuser$> canbusload can0@100000 can1@500000 can2@500000 can3@500000 -r -t -b -c\n\n");
-	fprintf(stderr, "%s 2008-05-27 15:18:49\n", prg);
+	fprintf(stderr, "%s 2014-02-01 21:13:16 (worst case bitstuffing)\n", prg);
 	fprintf(stderr, " can0@100000   805   74491  36656  74%% |XXXXXXXXXXXXXX......|\n");
 	fprintf(stderr, " can1@500000   796   75140  37728  15%% |XXX.................|\n");
 	fprintf(stderr, " can2@500000     0       0      0   0%% |....................|\n");
@@ -137,7 +139,7 @@ void printstats(int signo)
 
 		localtime_r(&currtime, &now);
 
-		printf("%s %04d-%02d-%02d %02d:%02d:%02d\n",
+		printf("%s %04d-%02d-%02d %02d:%02d:%02d ",
 		       prg,
 		       now.tm_year + 1900,
 		       now.tm_mon + 1,
@@ -145,6 +147,28 @@ void printstats(int signo)
 		       now.tm_hour,
 		       now.tm_min,
 		       now.tm_sec);
+
+		switch (mode) {
+
+		case CFL_NO_BITSTUFFING:
+			/* plain bit calculation without bitstuffing */
+			printf("(ignore bitstuffing)\n");
+			break;
+
+		case CFL_WORSTCASE:
+			/* worst case estimation - see above */
+			printf("(worst case bitstuffing)\n");
+			break;
+
+		case CFL_EXACT:
+			/* exact calculation of stuffed bits based on frame content and CRC */
+			printf("(exact bitstuffing)\n");
+			break;
+
+		default:
+			printf("(unknown bitstuffing)\n");
+			break;
+		}
 	}
 
 	for (i=0; i<currmax; i++) {
@@ -223,7 +247,7 @@ int main(int argc, char **argv)
 
 	prg = basename(argv[0]);
 
-	while ((opt = getopt(argc, argv, "rtbcih?")) != -1) {
+	while ((opt = getopt(argc, argv, "rtbcieh?")) != -1) {
 		switch (opt) {
 		case 'r':
 			redraw = 1;
@@ -242,7 +266,11 @@ int main(int argc, char **argv)
 			break;
 
 		case 'i':
-			ignore_bitstuffing = 1;
+			mode = CFL_NO_BITSTUFFING;
+			break;
+
+		case 'e':
+			mode = CFL_EXACT;
 			break;
 
 		default:
@@ -372,32 +400,8 @@ int main(int argc, char **argv)
 
 				stat[i].recv_frames++;
 				stat[i].recv_bits_payload += frame.can_dlc*8;
-
-				/*
-				 * Following Ken Tindells *worst* case calculation for stuff-bits
-				 * (see "Guaranteeing Message Latencies on Controller Area Network" 1st ICC'94)
-				 * the needed bits on the wire can be calculated as:
-				 *
-				 * (34 + 8n)/5 + 47 + 8n for SFF frames (11 bit CAN-ID) => (269 + 48n)/5 
-				 * (54 + 8n)/5 + 67 + 8n for EFF frames (29 bit CAN-ID) => (389 + 48n)/5 
-				 *
-				 * while 'n' is the data length code (number of payload bytes)
-				 *
-				 */
-
-				if (ignore_bitstuffing) {
-					/* calculation without bitstuffing */
-					if (frame.can_id & CAN_EFF_FLAG)
-						stat[i].recv_bits_total += 67 + frame.can_dlc*8;
-					else
-						stat[i].recv_bits_total += 47 + frame.can_dlc*8;
-				} else {
-					/* needed bits including estimated worst case stuff bits */
-					if (frame.can_id & CAN_EFF_FLAG)
-						stat[i].recv_bits_total += (389 + frame.can_dlc*48)/5;
-					else
-						stat[i].recv_bits_total += (269 + frame.can_dlc*48)/5;
-				}
+				stat[i].recv_bits_total += can_frame_length((struct canfd_frame*)&frame,
+									    mode, sizeof(frame));
 			}
 		}
 	}

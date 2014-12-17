@@ -98,7 +98,10 @@ void printfilter(const void *data)
 {
 	struct can_filter *filter = (struct can_filter *)data;
 
-	printf("-f %03X:%X ", filter->can_id, filter->can_mask);
+	if (filter->can_id & CAN_INV_FILTER)
+		printf("-f %03X~%X ", (filter->can_id & ~CAN_INV_FILTER), filter->can_mask);
+	else
+		printf("-f %03X:%X ", filter->can_id, filter->can_mask);
 }
 
 void printmod(const char *type, const void *data)
@@ -192,6 +195,8 @@ void print_usage(char *prg)
 	fprintf(stderr, "           -d <dst_dev>  (destination netdevice)\n");
 	fprintf(stderr, "Options:   -t (preserve src_dev rx timestamp)\n");
 	fprintf(stderr, "           -e (echo sent frames - recommended on vcanx)\n");
+	fprintf(stderr, "           -i (allow to route to incoming interface)\n");
+	fprintf(stderr, "           -l <hops> (limit the number of frame hops / routings)\n");
 	fprintf(stderr, "           -f <filter> (set CAN filter)\n");
 	fprintf(stderr, "           -m <mod> (set frame modifications)\n");
 	fprintf(stderr, "           -x <from_idx>:<to_idx>:<result_idx>:<init_xor_val> (XOR checksum)\n");
@@ -353,7 +358,7 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 	struct nlmsghdr *nlh;
 	unsigned int src_ifindex = 0;
 	unsigned int dst_ifindex = 0;
-	__u32 handled, dropped;
+	__u32 handled, dropped, deleted;
 	int rtlen;
 
 
@@ -394,6 +399,7 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 
 		handled = 0;
 		dropped = 0;
+		deleted = 0;
 		src_ifindex = 0;
 		dst_ifindex = 0;
 
@@ -412,6 +418,7 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 			case CGW_MOD_OR:
 			case CGW_MOD_XOR:
 			case CGW_MOD_SET:
+			case CGW_LIM_HOPS:
 			case CGW_CS_XOR:
 			case CGW_CS_CRC8:
 				break;
@@ -432,6 +439,10 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 				dropped = *(__u32 *)RTA_DATA(rta);
 				break;
 
+			case CGW_DELETED:
+				deleted = *(__u32 *)RTA_DATA(rta);
+				break;
+
 			default:
 				printf("Unknown attribute %d!", rta->rta_type);
 				return -EINVAL;
@@ -448,6 +459,9 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 
 		if (rtc->flags & CGW_FLAGS_CAN_SRC_TSTAMP)
 			printf("-t ");
+
+		if (rtc->flags & CGW_FLAGS_CAN_IIF_TX_OK)
+			printf("-i ");
 
 		/* second parse for mod attributes */
 		rta = (struct rtattr *) RTCAN_RTA(rtc);
@@ -477,6 +491,10 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 				printmod("SET", RTA_DATA(rta));
 				break;
 
+			case CGW_LIM_HOPS:
+				printf("-l %d ", *(__u8 *)RTA_DATA(rta));
+				break;
+
 			case CGW_CS_XOR:
 				print_cs_xor((struct cgw_csum_xor *)RTA_DATA(rta));
 				break;
@@ -489,6 +507,7 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 			case CGW_DST_IF:
 			case CGW_HANDLED:
 			case CGW_DROPPED:
+			case CGW_DELETED:
 				break;
 
 			default:
@@ -498,7 +517,9 @@ int parse_rtlist(char *prgname, unsigned char *rxbuf, int len)
 			}
 		}
 
-		printf("# %d handled %d dropped\n", handled, dropped); /* end of entry */
+		/* end of entry */
+		printf("# %d handled %d dropped %d deleted\n",
+		       handled, dropped, deleted);
 
 		/* jump to next NLMSG in the given buffer */
 		nlh = NLMSG_NEXT(nlh, len);
@@ -530,6 +551,7 @@ int main(int argc, char **argv)
 	struct nlmsgerr *rte;
 	unsigned int src_ifindex = 0;
 	unsigned int dst_ifindex = 0;
+	__u8 limit_hops = 0;
 	__u16 flags = 0;
 	int len;
 
@@ -548,7 +570,7 @@ int main(int argc, char **argv)
 	memset(&cs_xor, 0, sizeof(cs_xor));
 	memset(&cs_crc8, 0, sizeof(cs_crc8));
 
-	while ((opt = getopt(argc, argv, "ADFLs:d:tef:c:p:x:m:?")) != -1) {
+	while ((opt = getopt(argc, argv, "ADFLs:d:teil:f:c:p:x:m:?")) != -1) {
 		switch (opt) {
 
 		case 'A':
@@ -585,6 +607,17 @@ int main(int argc, char **argv)
 
 		case 'e':
 			flags |= CGW_FLAGS_CAN_ECHO;
+			break;
+
+		case 'i':
+			flags |= CGW_FLAGS_CAN_IIF_TX_OK;
+			break;
+
+		case 'l':
+			if (sscanf(optarg, "%hhd", &limit_hops) != 1 || !(limit_hops)) {
+				printf("Bad hop limit definition '%s'.\n", optarg);
+				exit(1);
+			}
 			break;
 
 		case 'f':
@@ -723,6 +756,9 @@ int main(int argc, char **argv)
 
 	if (have_cs_xor)
 		addattr_l(&req.nh, sizeof(req), CGW_CS_XOR, &cs_xor, sizeof(cs_xor));
+
+	if (limit_hops)
+		addattr_l(&req.nh, sizeof(req), CGW_LIM_HOPS, &limit_hops, sizeof(__u8));
 
 	/*
 	 * a better example code
