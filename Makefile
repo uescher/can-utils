@@ -54,7 +54,7 @@ CPPFLAGS += -Iinclude \
 
 LDFLAGS  = -lrt
 
-PROGRAMS_ISOTP = isotpdump isotprecv isotpsend isotpsniffer isotptun isotpserver
+PROGRAMS_ISOTP = isotpdump isotprecv isotpsend isotpsniffer isotptun isotpserver isotpperf
 PROGRAMS_CANGW = cangw
 PROGRAMS_SLCAN = slcan_attach slcand
 PROGRAMS = can-calc-bit-timing candump cansniffer cansend canplayer cangen canbusload\

@@ -37,9 +37,7 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <termios.h>
-
-/* default slcan line discipline since Kernel 2.6.25 */
-#define LDISC_N_SLCAN 17
+#include <linux/tty.h>
 
 /* Change this to whatever your daemon is called */
 #define DAEMON_NAME "slcand"
@@ -49,9 +47,6 @@
 
 /* The length of ttypath buffer */
 #define TTYPATH_LENGTH	64
-
-#define EXIT_SUCCESS 0
-#define EXIT_FAILURE 1
 
 /* UART flow control types */
 #define FLOW_NONE 0
@@ -71,8 +66,9 @@ void print_usage(char *prg)
 	fprintf(stderr, "         -F         (stay in foreground; no daemonize)\n");
 	fprintf(stderr, "         -h         (show this help page)\n");
 	fprintf(stderr, "\nExamples:\n");
-	fprintf(stderr, "slcand -o -c -f -s6 ttyslcan0\n");
-	fprintf(stderr, "slcand -o -c -f -s6 ttyslcan0 can0\n");
+	fprintf(stderr, "slcand -o -c -f -s6 ttyUSB0\n");
+	fprintf(stderr, "slcand -o -c -f -s6 ttyUSB0 can0\n");
+	fprintf(stderr, "slcand -o -c -f -s6 /dev/ttyUSB0\n");
 	fprintf(stderr, "\n");
 	exit(EXIT_FAILURE);
 }
@@ -182,7 +178,7 @@ int main(int argc, char *argv[])
 	char *btr = NULL;
 	int run_as_daemon = 1;
 	char *pch;
-	int ldisc = LDISC_N_SLCAN;
+	int ldisc = N_SLCAN;
 	int fd;
 
 	ttypath[0] = '\0';
@@ -336,13 +332,13 @@ int main(int argc, char *argv[])
 	/* set slcan like discipline on given tty */
 	if (ioctl(fd, TIOCSETD, &ldisc) < 0) {
 		perror("ioctl TIOCSETD");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	
 	/* retrieve the name of the created CAN netdevice */
 	if (ioctl(fd, SIOCGIFNAME, buf) < 0) {
 		perror("ioctl SIOCGIFNAME");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	syslog(LOG_NOTICE, "attached TTY %s to netdevice %s\n", ttypath, buf);
@@ -361,7 +357,7 @@ int main(int argc, char *argv[])
 			if (ioctl(s, SIOCSIFNAME, &ifr) < 0) {
 				syslog(LOG_NOTICE, "netdevice %s rename to %s failed\n", buf, name);
 				perror("ioctl SIOCSIFNAME rename");
-				exit(1);
+				exit(EXIT_FAILURE);
 			} else
 				syslog(LOG_NOTICE, "netdevice %s renamed to %s\n", buf, name);
 
