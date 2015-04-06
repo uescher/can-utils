@@ -68,7 +68,6 @@ void print_usage(char *prg)
 	fprintf(stderr, "         -d <can_id> (destination can_id. Use 8 digits for extended IDs)\n");
 	fprintf(stderr, "         -x <addr>   (extended addressing mode)\n");
 	fprintf(stderr, "         -X <addr>   (extended addressing mode (rx addr))\n");
-	fprintf(stderr, "         -f          (CAN FD mode - only process CAN FD frames)\n");
 	fprintf(stderr, "\nCAN IDs and addresses are given and expected in hexadecimal values.\n");
 	fprintf(stderr, "\n");
 }
@@ -104,6 +103,8 @@ int main(int argc, char **argv)
 	int datidx = 0;
 	unsigned char bs = 0;
 	unsigned char stmin = 0;
+	unsigned char brs = 0;
+	unsigned char ll_dl = 0;
 	unsigned long fflen = 0;
 	unsigned fflen_digits = 0;
 	unsigned long rcvlen = 0;
@@ -219,7 +220,7 @@ int main(int argc, char **argv)
 			running = 0;
 			continue;
 		} else if (nbytes != CAN_MTU && nbytes != CANFD_MTU) {
-			fprintf(stderr, "read: incomplete CAN frame %lu %d\n", sizeof(frame), nbytes);
+			fprintf(stderr, "read: incomplete CAN frame %zu %d\n", sizeof(frame), nbytes);
 			ret = nbytes;
 			running = 0;
 			continue;
@@ -274,6 +275,12 @@ int main(int argc, char **argv)
 				/* get number of digits for printing */
 				fflen_digits = getdigits(fflen);
 
+				/* get CAN FD bitrate & LL_DL setting information */
+				brs = frame.flags & CANFD_BRS;
+				ll_dl = frame.len;
+				if (ll_dl < 8)
+					ll_dl = 8;
+
 				ioctl(s, SIOCGSTAMP, &start_tv);
 
 				/* determine CAN frame mode for this PDU */
@@ -309,6 +316,10 @@ int main(int argc, char **argv)
 
 				/* get number of digits for printing */
 				fflen_digits = getdigits(fflen);
+
+				/* get CAN FD bitrate & LL_DL setting information */
+				brs = frame.flags & CANFD_BRS;
+				ll_dl = frame.len;
 
 				ioctl(s, SIOCGSTAMP, &start_tv);
 
@@ -361,11 +372,11 @@ int main(int argc, char **argv)
 			/* PDU complete */
 			if (rcvlen && rcvlen >= fflen) {
 
-				printf("\r%s (BS:%2hhu # ", canfd_on?"CAN-FD":"CAN2.0", bs);
+				printf("\r%s %02d%c (BS:%2hhu # ", canfd_on?"CAN-FD":"CAN2.0", ll_dl, brs?'*':' ', bs);
 				if (stmin < 0x80)
 					printf("STmin:%3hhu msec)", stmin);
 				else if (stmin > 0xF0 && stmin < 0xFA)
-					printf("STmin:3%u usec)", (stmin & 0xF) * 100);
+					printf("STmin:%3u usec)", (stmin & 0xF) * 100);
 				else
 					printf("STmin: invalid   )");
 
