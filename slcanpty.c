@@ -185,6 +185,13 @@ rx_restart:
 		ptr = 1;
 		goto rx_out;
 	}
+	/* check for 'v'ersion command */
+	if (cmd == 'v') {
+		sprintf(replybuf, "v1014\r");
+		tmp = strlen(replybuf);
+		ptr = 1;
+		goto rx_out;
+	}
 
 	/* check for serial 'N'umber command */
 	if (cmd == 'N') {
@@ -415,7 +422,6 @@ int main(int argc, char **argv)
 	int s; /* can raw socket */ 
 	struct sockaddr_can addr;
 	struct termios topts;
-	struct ifreq ifr;
 	int select_stdin = 0;
 	int running = 1;
 	int tstamp = 0;
@@ -490,13 +496,7 @@ int main(int argc, char **argv)
 	}
 
 	addr.can_family = AF_CAN;
-
-	strcpy(ifr.ifr_name, argv[2]);
-	if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
-		perror("SIOCGIFINDEX");
-		return 1;
-	}
-	addr.can_ifindex = ifr.ifr_ifindex;
+	addr.can_ifindex = if_nametoindex(argv[2]);
 
 	/* disable reception of CAN frames until we are opened by 'O' */
 	setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, NULL, 0);
